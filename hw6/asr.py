@@ -1,7 +1,8 @@
 import torch
 import torchaudio
-from torch import nn
+from torch import nn, optim
 import os
+from transformers import AutoProcessor, ASTModel
 from torch.utils.data import Dataset, DataLoader
 
 
@@ -58,6 +59,61 @@ train_audio_transforms = nn.Sequential(
     torchaudio.transforms.FrequencyMasking(freq_mask_param=15),
     torchaudio.transforms.TimeMasking(time_mask_param=35)
 )
+
+
+# # Define the model
+# class ASRModel(nn.Module):
+#     def __init__(self, num_classes):
+#         super(ASRModel, self).__init__()
+#         # Initialize the Wav2Vec 2.0 model
+#         self.wav2vec2 = ASTModel.from_pretrained("MIT/ast-finetuned-audioset-10-10-0.4593")
+#         self.dropout = nn.Dropout(0.1)
+#         # Output layer
+#         self.fc = nn.Linear(self.wav2vec2.config.hidden_size, num_classes)
+
+#     def forward(self, x):
+#         x = self.wav2vec2(x).last_hidden_state
+#         x = self.dropout(x)
+#         x = self.fc(x)
+#         return x
+
+# Prepare the dataset and dataloader
+dataset = AudioDataset('train')
+dataloader = DataLoader(dataset, batch_size=16, shuffle=True, collate_fn=collate_fn_train)
+
+# Define the model
+num_classes = len(char2idx)  # Number of classes
+model = ASRModel(num_classes=num_classes)
+
+# Move model to GPU if available
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model.to(device)
+
+# Loss and optimizer
+loss_function = nn.CTCLoss(blank=10, zero_infinity=True)  # Assuming 'o' (blank token) is class 10
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+# Training loop
+num_epochs = 10
+model.train()
+for epoch in range(num_epochs):
+    for spectograms, labels, input_lengths, target_lengths in dataloader:
+        # Move data to device
+        spectograms, labels = spectograms.to(device), labels.to(device)
+        optimizer.zero_grad()
+
+        # Forward pass
+        outputs = model(spectograms)
+        output_lengths = torch.tensor([outputs.size(1)] * outputs.size(0))
+        
+        # Compute loss
+        loss = loss_function(outputs.log_softmax(2), labels, output_lengths, target_lengths)
+
+        # Backward and optimize
+        loss.backward()
+        optimizer.step()
+
+print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}')
 
 if __name__ == '__main__':
     dataset = AudioDataset('train')
